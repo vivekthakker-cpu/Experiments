@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Image Ring Carousel</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #000;
+            color: #fff;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 25px;
+            border-radius: 15px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #ccc;
+        }
+        input, select, button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+        input:focus, select:focus {
+            border-color: #4a90e2;
+        }
+        button {
+            cursor: pointer;
+            background: #4a90e2;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #357abd;
+        }
+        #message-box {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 0, 0, 0.8);
+            padding: 10px 20px;
+            border-radius: 8px;
+            display: none;
+            z-index: 100;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="container">
+        <div id="controls">
+            <div class="control-group">
+                <label for="image-url">Image URL</label>
+                <input type="text" id="image-url" placeholder="Enter image URL">
+            </div>
+            <div class="control-group">
+                <label for="ring-select-update">Target Ring</label>
+                <select id="ring-select-update"></select>
+            </div>
+            <button id="update-button">Update Ring</button>
+            <div class="control-group">
+                <label for="ring-select-focus">Focus Ring</label>
+                <select id="ring-select-focus"></select>
+            </div>
+             <button id="reset-camera-button">Reset Camera</button>
+        </div>
+    </div>
+    <div id="message-box"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+
+    <script>
+        // --- Basic Setup ---
+        let scene, camera, renderer, controls;
+        const container = document.getElementById('container');
+        const rings = [];
+        const TOTAL_RINGS = 20;
+        const IMAGES_PER_RING = 16;
+
+        // --- UI Elements ---
+        const imageUrlInput = document.getElementById('image-url');
+        const updateRingSelect = document.getElementById('ring-select-update');
+        const focusRingSelect = document.getElementById('ring-select-focus');
+        const updateButton = document.getElementById('update-button');
+        const resetCameraButton = document.getElementById('reset-camera-button');
+        const messageBox = document.getElementById('message-box');
+
+        // --- Initialization ---
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.005);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+            camera.position.set(0, 50, 200);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 10;
+            controls.maxDistance = 1000;
+            controls.target.set(0, 0, 0);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(100, 100, 100);
+            scene.add(directionalLight);
+
+            // Create Rings
+            createAllRings();
+            
+            // Populate UI
+            populateSelectors();
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            updateButton.addEventListener('click', onUpdateRing);
+            focusRingSelect.addEventListener('change', onFocusRing);
+            resetCameraButton.addEventListener('click', resetCamera);
+        }
+
+        // --- Ring Creation ---
+        function createAllRings() {
+            const textureLoader = new THREE.TextureLoader();
+            const baseRadius = 50;
+            const radiusStep = 30;
+
+            for (let i = 0; i < TOTAL_RINGS; i++) {
+                const ringGroup = new THREE.Group();
+                const radius = baseRadius + i * radiusStep;
+                
+                // Load a placeholder texture for each image plane
+                const placeholderUrl = `https://placehold.co/256x256/1a1a1a/ffffff?text=Ring+${i}`;
+                const texture = textureLoader.load(placeholderUrl);
+                const material = new THREE.MeshStandardMaterial({ 
+                    map: texture,
+                    side: THREE.DoubleSide,
+                    emissive: 0x111111, // Give it a slight glow
+                });
+
+                for (let j = 0; j < IMAGES_PER_RING; j++) {
+                    const angle = (j / IMAGES_PER_RING) * Math.PI * 2;
+                    
+                    const planeGeo = new THREE.PlaneGeometry(20, 20);
+                    const imagePlane = new THREE.Mesh(planeGeo, material);
+
+                    // Position the plane on the circle
+                    imagePlane.position.x = Math.cos(angle) * radius;
+                    imagePlane.position.z = Math.sin(angle) * radius;
+
+                    // Orient the plane to face the center
+                    imagePlane.lookAt(0, imagePlane.position.y, 0);
+                    
+                    ringGroup.add(imagePlane);
+                }
+                
+                // Set a random rotation speed for each ring
+                ringGroup.userData.rotationSpeed = (Math.random() - 0.5) * 0.01;
+                
+                rings.push(ringGroup);
+                scene.add(ringGroup);
+            }
+        }
+        
+        // --- UI and Event Handling ---
+        function populateSelectors() {
+            for (let i = 0; i < TOTAL_RINGS; i++) {
+                const optionUpdate = document.createElement('option');
+                optionUpdate.value = i;
+                optionUpdate.textContent = `Ring ${i}`;
+                updateRingSelect.appendChild(optionUpdate);
+
+                const optionFocus = document.createElement('option');
+                optionFocus.value = i;
+                optionFocus.textContent = `Ring ${i}`;
+                focusRingSelect.appendChild(optionFocus);
+            }
+             const defaultOption = document.createElement('option');
+             defaultOption.value = -1;
+             defaultOption.textContent = 'Overview';
+             defaultOption.selected = true;
+             focusRingSelect.prepend(defaultOption);
+        }
+
+        function onUpdateRing() {
+            const ringIndex = parseInt(updateRingSelect.value);
+            const url = imageUrlInput.value.trim();
+
+            if (!url) {
+                showMessage("Please enter an image URL.", true);
+                return;
+            }
+
+            const ringToUpdate = rings[ringIndex];
+            if (!ringToUpdate) return;
+
+            const textureLoader = new THREE.TextureLoader();
+            textureLoader.load(
+                url,
+                (newTexture) => {
+                    // On successful load
+                    const newMaterial = new THREE.MeshStandardMaterial({ 
+                        map: newTexture, 
+                        side: THREE.DoubleSide,
+                        emissive: 0x111111
+                    });
+                    
+                    // Update material for all planes in the ring
+                    ringToUpdate.children.forEach(child => {
+                        if (child.isMesh) {
+                            child.material.dispose(); // Dispose old material
+                            child.material = newMaterial;
+                        }
+                    });
+                    newMaterial.needsUpdate = true;
+                    showMessage(`Ring ${ringIndex} updated successfully!`);
+                    imageUrlInput.value = '';
+                },
+                undefined, // onProgress callback (not used)
+                () => {
+                    // On error
+                    showMessage(`Failed to load image from URL for Ring ${ringIndex}. Please check the URL and CORS policy.`, true);
+                }
+            );
+        }
+
+        function onFocusRing() {
+            const ringIndex = parseInt(focusRingSelect.value);
+            if (ringIndex === -1) {
+                resetCamera();
+                return;
+            }
+            
+            const targetRing = rings[ringIndex];
+            if (!targetRing) return;
+
+            // Calculate target position
+            const baseRadius = 50;
+            const radiusStep = 30;
+            const ringRadius = baseRadius + ringIndex * radiusStep;
+            
+            const targetPosition = new THREE.Vector3(0, 15, ringRadius + 40); // Position camera just outside the ring
+            const targetLookAt = new THREE.Vector3(0, 0, 0);
+
+            // Animate camera using GSAP
+            gsap.to(camera.position, {
+                duration: 2,
+                x: targetPosition.x,
+                y: targetPosition.y,
+                z: targetPosition.z,
+                ease: "power3.inOut"
+            });
+
+            gsap.to(controls.target, {
+                duration: 2,
+                x: targetLookAt.x,
+                y: targetLookAt.y,
+                z: targetLookAt.z,
+                ease: "power3.inOut",
+                onUpdate: () => controls.update()
+            });
+        }
+        
+        function resetCamera() {
+            focusRingSelect.value = -1; // Reset dropdown
+            gsap.to(camera.position, {
+                duration: 2,
+                x: 0,
+                y: 50,
+                z: 200,
+                ease: "power3.inOut"
+            });
+            gsap.to(controls.target, {
+                duration: 2,
+                x: 0,
+                y: 0,
+                z: 0,
+                ease: "power3.inOut",
+                onUpdate: () => controls.update()
+            });
+        }
+        
+        function showMessage(text, isError = false) {
+            messageBox.textContent = text;
+            messageBox.style.backgroundColor = isError ? 'rgba(255, 69, 0, 0.8)' : 'rgba(60, 179, 113, 0.8)';
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 4000);
+        }
+
+        // --- Window Resize ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate each ring
+            rings.forEach(ring => {
+                ring.rotation.y += ring.userData.rotationSpeed;
+            });
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- Start ---
+        init();
+        animate();
+    </script>
+</body>
+</html>
